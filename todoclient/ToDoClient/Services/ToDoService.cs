@@ -49,7 +49,7 @@ namespace ToDoClient.Services
         private static int blankId;
         private static int maxId;
         private static bool toggle;
-        private object thisLock = new object();
+        
         /// <summary>
         /// Creates the service.
         /// </summary>
@@ -75,7 +75,7 @@ namespace ToDoClient.Services
                 if (!toggle)
                 {
                     maxId = _itemRepository.GetItems().Last().ToDoId;
-                    blankId = maxId + 1;
+                    blankId = maxId;
                     toggle = true;
                 }
 
@@ -87,10 +87,11 @@ namespace ToDoClient.Services
                 var dataAsString = httpClient.GetStringAsync(string.Format(serviceApiUrl + GetAllUrl, userId)).Result;
                 var userViewItems = JsonConvert.DeserializeObject<IList<ToDoItemViewModel>>(dataAsString);
                 var items = userViewItems.Select(i => i.ToItem()).ToList();
+
                 if (!toggle)
                 {
-                    maxId = items.Count == 0 ? 1 : items.Last().ToDoId;
-                    blankId = maxId + 1;
+                    maxId = items.Count == 0 ? 0 : items.Last().ToDoId;
+                    blankId = maxId;
                     toggle = true;
                 }
                 foreach (var elem in items)
@@ -108,14 +109,14 @@ namespace ToDoClient.Services
         /// <param name="item">The todo to create.</param>
         public void CreateItem(ToDoItemViewModel item)
         {
-            item.ToDoId = maxId;
+            item.ToDoId = ++maxId;
             _itemRepository.Create(item.ToItem());
 
 
             ThreadPool.QueueUserWorkItem(t =>
             {
                 httpClient.PostAsJsonAsync(serviceApiUrl + CreateUrl, item).Result.EnsureSuccessStatusCode();
-                MapAzureId(item, maxId++);
+                MapAzureId(item, maxId);
             });
 
 
@@ -129,7 +130,7 @@ namespace ToDoClient.Services
         {
             _itemRepository.Update(item.ToItem());
 
-            if (blankId > item.ToDoId)
+            if (blankId >= item.ToDoId)
             {
                 ThreadPool.QueueUserWorkItem(t => httpClient.DeleteAsync(string.Format(serviceApiUrl + DeleteUrl, item.ToDoId))
                 .Result.EnsureSuccessStatusCode());
@@ -151,7 +152,7 @@ namespace ToDoClient.Services
         {
             _itemRepository.Delete(id);
 
-            if (blankId > id)
+            if (blankId >= id)
             {
                 ThreadPool.QueueUserWorkItem(t => httpClient.DeleteAsync(string.Format(serviceApiUrl + DeleteUrl, id))
                 .Result.EnsureSuccessStatusCode());
@@ -171,8 +172,6 @@ namespace ToDoClient.Services
 
         private void MapAzureId(ToDoItemViewModel item, int maxId)
         {
-            lock (thisLock)
-            {
                 var dataAsString = httpClient.GetStringAsync(string.Format(serviceApiUrl + GetAllUrl, item.UserId)).Result;
                 var userViewItems = JsonConvert.DeserializeObject<IList<ToDoItemViewModel>>(dataAsString);
                 var lastNewIdFromAzure = userViewItems.Last().ToDoId;
@@ -180,8 +179,7 @@ namespace ToDoClient.Services
                 {
                     idAzure = lastNewIdFromAzure,
                     idUi = maxId
-                });
-            }
+                });          
 
         }
     }
